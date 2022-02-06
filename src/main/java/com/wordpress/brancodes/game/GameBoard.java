@@ -3,15 +3,18 @@ package com.wordpress.brancodes.game;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
 
-public class GameBoard {
+public class GameBoard implements Cloneable {
 
 	private static final Random RAND = new Random();
 
 	private boolean expanded;
 	private List<Move> moves;
+	private int moveAmount;
 	private final int width;
 	private final int height;
+	private int move; // move to get here; semi-hashcode for MinimaxSearcher
 	private final byte[][] verticals;
 	private final byte[][] horizontals;
 	private final byte[][] captured;
@@ -22,8 +25,7 @@ public class GameBoard {
 	}
 
 	public GameBoard(final int height, final int width) {
-		this(width, height,
-			 new byte[height][width + 1],
+		this(width, height, 0, -1, new byte[height][width + 1],
 			 new byte[height + 1][width],
 			 new byte[height][width],
 			 new byte[height][width]);
@@ -35,11 +37,14 @@ public class GameBoard {
 	}
 
 	public GameBoard(final int width, final int height,
+					 final int moveAmount, final int move,
 					 final byte[][] verticals, final byte[][] horizontals,
 					 final byte[][] captured, final byte[][] tileValues) {
 		expanded = false;
+		this.move = move;
 		this.width = width;
 		this.height = height;
+		this.moveAmount = moveAmount;
 		this.verticals = verticals;
 		this.horizontals = horizontals;
 		this.captured = captured;
@@ -49,7 +54,7 @@ public class GameBoard {
 	/**
 	 * @param pos position of next edge to play from top left to bottom right excluding filled edges
 	 */
-	public void move(int player, int pos) { // could implement a Map<Integer, Point> for O(1), but the board is too tiny to care
+	public void move(int player, int pos) { // could implement a Map<Integer, Point> for O(1), but the board is too small to care
 		int option = 0;
 		for (int i = 0; i < height + 1; i++) {
 			for (int j = 0; j < width; j++) {
@@ -79,25 +84,32 @@ public class GameBoard {
 		if (expanded)
 			return moves;
 		moves = new ArrayList<>();
+		AtomicInteger moveNum = new AtomicInteger(0);
 		for (int i = 0; i < height + 1; i++) {
-			expand0(player, i, false);
+			expand0(player, i, false, moveNum);
 			if (i < height - 1) {
-				expand0(player, i, true);
+				expand0(player, i, true, moveNum);
 			}
 		}
 		expanded = true;
 		return moves;
 	}
 
-	private void expand0(int player, int i, boolean isVertical) {
+	private void expand0(int player, int i, boolean isVertical, AtomicInteger moveNum) { // TODO antipattern?
 		for (int j = 0; j < width; j++) {
 			if (directionals(isVertical)[i][j] == 0) {
-				GameBoard next = this.clone();
+				GameBoard next = clone();
 				(isVertical ? next.verticals : next.horizontals)[i][j] = (byte) player;
 				refreshTileCaptures(player);
+				next.incrementMoveAmount();
+				next.setMove(moveNum.getAndIncrement());
 				moves.add(new Move(player, isVertical, i, j, next));
 			}
 		}
+	}
+
+	private void setMove(final int move) {
+		this.move = move;
 	}
 
 	private byte[][] directionals(boolean isVertical) {
@@ -124,22 +136,6 @@ public class GameBoard {
 			for (int j = 0; j < width; j++)
 				if (captured[i][j] < 0)
 					captured[i][j] = 0; // fix temp negatives back to 0
-		// forEach((i, j) -> {
-		// 	if (searchCaptured(i, j)) {
-		// 		forEach((i0, j0) -> {
-		// 			if (captured[i0][j0] == -1)
-		// 				captured[i0][j0] = (byte) lastPlayer;
-		// 		});
-		// 		} else {
-		// 		forEach((i0, j0) -> {
-		// 			if (captured[i0][j0] == -1)
-		// 				captured[i0][j0] = -2;
-		// 		});
-		// 	}});
-		// forEach((i, j) -> {
-		// 	if (captured[i][j] < 0)
-		// 		captured[i][j] = 0;
-		// });
 	}
 
 	private void updateJustSearched(int to) {
@@ -209,10 +205,19 @@ public class GameBoard {
 		return true;
 	}
 
+	public int getMoveAmount() {
+		return moveAmount;
+	}
+
+	void incrementMoveAmount() {
+		moveAmount++;
+	}
+
 	public String gameOverToString() {
 		final int player1Score = getPlayer1Score();
 		final int player2Score = getPlayer2Score();
-		return "Player " + (player1Score > player2Score ? '1' : '2') + " wins " + player1Score + " - " + player2Score;
+		return (player1Score == player2Score) ? "Tie " : ("Player " + (player1Score > player2Score ? '1' : '2') + " wins ")
+					+ player1Score + " - " + player2Score;
 	}
 
 	private char tileToChar(byte val) {
@@ -240,10 +245,6 @@ public class GameBoard {
 		return sB.toString();
 	}
 
-	private char tileToPlayChar(byte val) {
-		return val == 0 ? ' ' : (char) (val + '0');
-	}
-
 	public String toPlayableString() {
 		StringBuilder sB = new StringBuilder();
 		char option = 'A';
@@ -265,8 +266,13 @@ public class GameBoard {
 	}
 
 	@Override
-	protected GameBoard clone() {
-		return new GameBoard(width, height, verticals, horizontals, captured, tileValues);
+	public GameBoard clone() {
+		try {
+			return (GameBoard) super.clone();
+		} catch (CloneNotSupportedException e) {
+			e.printStackTrace();
+		}
+		return new GameBoard(width, height, moveAmount, move, verticals.clone(), horizontals.clone(), captured.clone(), tileValues.clone());
 	}
 
 }
