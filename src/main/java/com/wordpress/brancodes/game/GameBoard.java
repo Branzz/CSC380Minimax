@@ -1,9 +1,6 @@
 package com.wordpress.brancodes.game;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 
 import static com.wordpress.brancodes.game.Tile.*;
 
@@ -12,15 +9,15 @@ public class GameBoard implements Cloneable {
 	private static final Random RAND = new Random();
 
 	private boolean expanded;
-	private List<Move> moves;
+	private List<GameBoard> moves;
 	private int moveAmount;
 	private final int width;
 	private final int height;
 	private int move; // move to get here; semi-hashcode for MinimaxSearcher
-	private final byte[][] verticals;
-	private final byte[][] horizontals;
-	private final Tile[][] captured;
-	private final byte[][] tileValues;
+	private byte[][] verticals;
+	private byte[][] horizontals;
+	private Tile[][] captured;
+	private byte[][] tileValues;
 	private int score; // p2 - p1
 	private boolean throwDraw = false;
 
@@ -90,15 +87,39 @@ public class GameBoard implements Cloneable {
 		}
 	}
 
+	/**
+	 * apply a move at this specific spot
+	 */
 	private void move(int player, boolean isVertical, int i, int j) {
 		(isVertical ? verticals : horizontals)[i][j] = (byte) player;
 		move(player);
 	}
 
-	public void move(final Move m) {
-		move(m.player(), m.isVertical(), m.i(), m.j());
+	/**
+	 * move from this game board to another
+	 */
+	public void move(final GameBoard other) {
+		if (other.expanded) {
+			expanded = true;
+			moves = other.moves;
+		} else {
+			expanded = false;
+			moves = null;
+		}
+		precalculatedPotentialMoves = other.precalculatedPotentialMoves;
+		moveAmount = other.moveAmount;
+		move = other.move;
+		verticals = other.verticals;
+		horizontals = other.horizontals;
+		captured = other.captured;
+		tileValues = other.tileValues;
+		score = other.score;
+		throwDraw = other.throwDraw;
 	}
 
+	/**
+	 * move at a random spot (used by RandomPlayer)
+	 */
 	void moveRandom(int player) {
 		while (true) {
 			final boolean isVertical = RAND.nextBoolean();
@@ -112,6 +133,10 @@ public class GameBoard implements Cloneable {
 		}
 	}
 
+	/**
+	 * required "refresh" after each move type
+	 * check for new captured area and delete its children
+	 */
 	private void move(int player) {
 		refreshTileCaptures(player);
 		unexpand();
@@ -121,9 +146,10 @@ public class GameBoard implements Cloneable {
 	private void unexpand() {
 		expanded = false;
 		moves = null;
+		precalculatedPotentialMoves = null;
 	}
 
-	public List<Move> expand(int player) {
+	public List<GameBoard> expand(int player) {
 		if (expanded)
 			return moves;
 		moves = new ArrayList<>();
@@ -133,11 +159,9 @@ public class GameBoard implements Cloneable {
 				if (horizontals[i][j] == 0) {
 					GameBoard next = clone();
 					next.horizontals[i][j] = (byte) player;
-					next.refreshTileCaptures(player);
-					next.incrementMoveAmount();
-					next.unexpand();
+					next.move(player);
 					next.setMove(moveNum++);
-					moves.add(new Move(player, false, i, j, next));
+					moves.add(next);
 				}
 			}
 			if (i < height) {
@@ -145,17 +169,101 @@ public class GameBoard implements Cloneable {
 					if (verticals[i][j] == 0) { // extracted method is tempting here, but it quickly leads to bad design
 						GameBoard next = clone();
 						next.verticals[i][j] = (byte) player;
-						next.refreshTileCaptures(player);
-						next.incrementMoveAmount();
-						next.unexpand();
+						next.move(player);
 						next.setMove(moveNum++);
-						moves.add(new Move(player, true, i, j, next));
+						moves.add(next);
 					}
 				}
 			}
 		}
 		expanded = true;
 		return moves;
+	}
+
+	/**
+	 * if the iterator was called and didn't finish and it's being expanded again,
+	 * then its old data can be reused
+	 */
+	private List<ExpandIter.PotentialMove> precalculatedPotentialMoves = null;
+
+	/**
+	 * use an iterator to help alpha beta pruning
+	 */
+	public Iterator<GameBoard> expandIter(int player) {
+		if (expanded)
+			return moves.iterator();
+		return new ExpandIter(this, player);
+	}
+
+	private class ExpandIter implements Iterator<GameBoard> {
+
+		private final GameBoard gameBoard;
+		private final int player;
+		private List<PotentialMove> potentialMoves;
+		private int moveNum;
+
+		public ExpandIter(final GameBoard gameBoard, final int player) {
+			this.gameBoard = gameBoard;
+			this.player = player;
+			moveNum = 0;
+			potentialMoves = new ArrayList<>();
+			if (precalculatedPotentialMoves != null)
+				potentialMoves = precalculatedPotentialMoves;
+			else
+				calculatePotentialMoves();
+		}
+
+		private void calculatePotentialMoves() {
+			for (int i = 0; i < height + 1; i++) {
+				for (int j = 0; j < width; j++)
+					if (horizontals[i][j] == 0)
+						potentialMoves.add(new PotentialMove(false, i, j));
+				if (i < height)
+					for (int j = 0; j < width + 1; j++)
+						if (verticals[i][j] == 0)
+							potentialMoves.add(new PotentialMove(true, i, j));
+			}
+			moves = new ArrayList<>();
+			precalculatedPotentialMoves = potentialMoves;
+		}
+
+		@Override
+		public boolean hasNext() {
+			final boolean hasNext = moveNum < potentialMoves.size();
+			if (!hasNext) {
+				expanded = true;
+			}
+			return hasNext;
+		}
+
+		/**
+		 * only ever calculate a board's expansion when needed
+		 */
+		@Override
+		public GameBoard next() {
+			if (moveNum < moves.size())
+				return moves.get(moveNum++);
+			final GameBoard move = potentialMoves.get(moveNum).toMove(gameBoard, player, moveNum++);
+			moves.add(move);
+			return move;
+		}
+
+		private record PotentialMove(boolean isVertical, int i, int j) {
+
+			/**
+			 * lazy expansion
+			 */
+			GameBoard toMove(GameBoard gameBoard, final int player, int moveNum) {
+				GameBoard next = gameBoard.clone();
+				(isVertical ? next.verticals : next.horizontals)[i][j] = (byte) 1;
+				next.refreshTileCaptures(player);
+				next.incrementMoveAmount();
+				next.unexpand();
+				next.setMove(moveNum);
+				return next;
+			}
+		}
+
 	}
 
 	private void setMove(final int move) {
@@ -221,14 +329,6 @@ public class GameBoard implements Cloneable {
 		return captured[i][j] == SEARCHED; // just checked a searched tile, so it could still be enclosed
 	}
 
-	private int getPlayer1Score() {
-		return getPlayerScore(1);
-	}
-
-	private int getPlayer2Score() {
-		return getPlayerScore(2);
-	}
-
 	int getPlayerScore(int player) {
 		final Tile tile = get(player);
 		int score = 0;
@@ -239,20 +339,12 @@ public class GameBoard implements Cloneable {
 			}
 		return score;
 	}
-
 	/**
+	 * dynamically updated after move instead of rechecking entire array
 	 * @return player 2's score - player 1's score
 	 */
 	int getScore() {
 		return score;
-		// int score = 0;
-		// for (int i = 0; i < height; i++)
-		// 	for (int j = 0; j < width; j++)
-		// 		if (captured[i][j] == FILL2)
-		// 			score += tileValues[i][j];
-		// 		else if (captured[i][j] == FILL1)
-		// 			score -= tileValues[i][j];
-		// return score;
 	}
 
 	/**
@@ -281,26 +373,15 @@ public class GameBoard implements Cloneable {
 	 * @return message at end of game showing if it's a tie or the winner and the scores
 	 */
 	public String gameOverToString() {
-		final int player1Score = getPlayer1Score();
-		final int player2Score = getPlayer2Score();
+		final int player1Score = getPlayerScore(1);
+		final int player2Score = getPlayerScore(2);
 		boolean p1Win = player1Score > player2Score;
-		return (player1Score == player2Score) ? "Tie " : ("Player " + (p1Win ? '1' : '2') + " wins! ")
+		return (didForfeit() ? "Forfeit! " : (player1Score == player2Score) ? "Tie " : ("Player " + (p1Win ? '1' : '2') + " wins! "))
 														 + (p1Win ? player1Score : player2Score) + " to " + (p1Win ? player2Score : player1Score);
-	}
-
-	/**
-	 * @return message showing only the current score
-	 */
-	public String getScoreString() {
-		final int player1Score = getPlayer1Score();
-		final int player2Score = getPlayer2Score();
-		boolean p1Win = player1Score > player2Score;
-		return (p1Win ? player1Score : player2Score) + " to " + (p1Win ? player2Score : player1Score);
 	}
 
 	private char tileToChar(byte val) {
 		return val == 0 ? ' ' : (char) (val + '0');
-		// return val == 0 ? ' ' : '-';
 	}
 
 	@Override
@@ -374,11 +455,6 @@ public class GameBoard implements Cloneable {
 
 	@Override
 	public GameBoard clone() {
-		// try {
-		// 	return (GameBoard) super.clone();
-		// } catch (CloneNotSupportedException e) {
-		// 	e.printStackTrace();
-		// }
 		return new GameBoard(width, height, moveAmount, move, score, clone(verticals), clone(horizontals), clone(captured), clone(tileValues));
 	}
 

@@ -13,8 +13,12 @@ public class ConsolePlayer extends Player {
 	@Override
 	public void move(final GameBoard gameBoard) {
 		System.out.print(gameBoard.toPlayableString());
-		char input;
-		input = in.next().charAt(0);
+		final String inputString = in.next();
+		if (inputString.equalsIgnoreCase("forfeit")) {
+			gameBoard.forfeit();
+			return;
+		}
+		final char input = inputString.charAt(0);
 		gameBoard.move(getPlayerID(), input - (input > 'z' ? 'A' : 'a'));
 	}
 
