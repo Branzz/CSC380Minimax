@@ -1,38 +1,50 @@
 package com.wordpress.brancodes.main;
 
-import com.wordpress.brancodes.game.ConsolePlayer;
-import com.wordpress.brancodes.game.GameBoard;
-import com.wordpress.brancodes.game.MinimaxSearcher;
-import com.wordpress.brancodes.game.Player;
+import com.wordpress.brancodes.game.*;
 
 public class Main {
 
 	public static void main(String[] args) {
-		run(4, 5);
+		run(3, 5);
 		// final Scanner in = new Scanner(System.in);
 		// System.out.println("Board size?");
 		// int boardSize = in.nextInt();
 		// System.out.println("Ply depth?");
 		// int layers = in.nextInt();
 		// run(boardSize, layers);
-		// in.close();
 	}
 
-	static void run(int boardSize, int layers) {
-		run(new ConsolePlayer(1), new MinimaxSearcher(2, layers), new GameBoard(boardSize));
+	public static void run(int boardSize, int layers) {
+		run(new ConsolePlayer(1), new MinimaxPlayer(2, layers), new GameBoard(boardSize));
 	}
 
-	static void run(Player player1, Player player2, GameBoard gameBoard) { // TODO scale to any amount of players?
-		while (!gameBoard.complete()) {
-			player1.move(gameBoard);
-			System.out.println(gameBoard);
-			if (gameBoard.complete()) {
+	// TODO scale to any amount of players?
+	public static void run(Player player1, Player player2, GameBoard gameBoard) {
+		System.out.print(gameBoard.toTileValueString());
+		while (true) {
+			if (playerMove(gameBoard, player1, 1))
 				break;
-			}
-			player2.move(gameBoard);
-			// System.out.println(gameBoard);
+			if (playerMove(gameBoard, player2, 2))
+				break;
 		}
-		System.out.println("Game complete: " + gameBoard.gameOverToString());
+	}
+
+	/**
+	 * @return if game ended
+	 */
+	private static boolean playerMove(GameBoard gameBoard, Player player, int playerNum) {
+		System.out.printf("Player %d's move:\n", playerNum);
+		player.move(gameBoard);
+		if (gameBoard.didForfeit()) {
+			System.out.printf("Player %d forfeited!\n" + gameBoard + gameBoard.getScoreString(), playerNum);
+			return true;
+		}
+		if (gameBoard.complete()) {
+			System.out.println("Game complete\n" + gameBoard + gameBoard.gameOverToString());
+			return true;
+		}
+		System.out.print(gameBoard);
+		return false;
 	}
 
 }
